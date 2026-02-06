@@ -1,54 +1,106 @@
-// app.js - FINAL VERSION (FIXED)
-require('dotenv').config({
-  debug: false, quiet: true
-});
+require('dotenv').config({ debug: false, quiet: true });
 const express = require('express');
 const mongoose = require('mongoose');
 const path = require('path');
-const Manga = require('./models/Manga');
-const Chapter = require('./models/Chapter');
+const admin = require('firebase-admin');
 
-// IMPORT RUTE API (PENTING)
+// Import Models
+const User = require('./models/User');
+
+// Import Routes
 const apiRoutes = require('./routes/api');
 
-const app = express();
+// ==========================================
+// 1. SETUP SERVER & MIDDLEWARE
+// ==========================================
+const app = express(); // Inisialisasi Express DULUAN
 const PORT = process.env.PORT || 3000;
 const WEBSITE_URL = process.env.SITE_URL || `http://localhost:${PORT}`;
 
+// Config View & Static Files
 app.set('view engine', 'ejs');
 app.set('views', path.join(__dirname, 'views'));
 app.use(express.static('public'));
 
+// Parser Body (Penting untuk Webhook Trakteer)
+app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
 
+// ==========================================
+// 2. FIREBASE ADMIN INIT
+// ==========================================
+try {
+    const serviceAccount = require('./serviceAccountKey.json');
+    admin.initializeApp({
+        credential: admin.credential.cert(serviceAccount)
+    });
+    console.log("[System] Firebase Admin Initialized.");
+} catch (error) {
+    console.warn("[Warning] Gagal init Firebase Admin. Cek 'serviceAccountKey.json'. Login Google mungkin error.");
+}
+
+// ==========================================
+// 3. AUTH MIDDLEWARE (Global)
+// ==========================================
+// Mengecek apakah ada token Bearer dari frontend
+app.use(async (req, res, next) => {
+    const authHeader = req.headers.authorization;
+    req.user = null; // Default null (Guest)
+
+    if (authHeader && authHeader.startsWith('Bearer ')) {
+        const idToken = authHeader.split('Bearer ')[1];
+        try {
+            // Verifikasi Token ke Google
+            const decodedToken = await admin.auth().verifyIdToken(idToken);
+            
+            // Cari User di MongoDB, kalau belum ada buat baru
+            let user = await User.findOne({ googleId: decodedToken.uid });
+            if (!user) {
+                user = await User.create({
+                    googleId: decodedToken.uid,
+                    email: decodedToken.email,
+                    displayName: decodedToken.name || 'User',
+                    isPremium: false,
+                    downloadCount: 0
+                });
+            }
+            // Simpan data user MongoDB ke request
+            req.user = { id: user._id, email: user.email }; 
+            
+        } catch (error) {
+            console.error("[Auth] Token invalid:", error.message);
+        }
+    }
+    next();
+});
+
+// ==========================================
+// 4. ROUTING
+// ==========================================
 app.use('/api', apiRoutes);
 
 // ==========================================
-// 4. SERVER STARTUP
+// 5. START SERVER
 // ==========================================
-
 const DB_URI = process.env.DB_URI;
 
-if (!DB_URI) {
-  console.error("FATAL ERROR: DB_URI is not defined in environment variables.");
-  process.exit(1);
-}
-
 const startServer = async () => {
-  try {
-    await mongoose.connect(DB_URI, {
-      serverSelectionTimeoutMS: 30000
-    });
-    console.log('Successfully connected to MongoDB...');
+    try {
+        if (!DB_URI) throw new Error("DB_URI tidak ditemukan di .env");
 
-    app.listen(PORT, () => {
-      console.log(`Server is running on port: ${PORT}`);
-      console.log(`Access at: ${WEBSITE_URL}`);
-    });
+        // Koneksi Database
+        await mongoose.connect(DB_URI);
+        console.log('[System] Connected to MongoDB...');
 
-  } catch (err) {
-    console.error('Failed to connect to MongoDB. Server will not start.', err);
-    process.exit(1);
-  }
+        // Jalankan Server
+        app.listen(PORT, () => {
+            console.log(`[System] Server running at: ${WEBSITE_URL}`);
+        });
+
+    } catch (err) {
+        console.error('[Fatal] Gagal menjalankan server:', err.message);
+        process.exit(1);
+    }
 };
 
 startServer();
