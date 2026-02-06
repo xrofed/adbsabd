@@ -1,13 +1,24 @@
 const express = require('express');
 const router = express.Router();
+const PDFDocument = require('pdfkit');
+const axios = require('axios');
+const sharp = require('sharp');
+
+// ==========================================
+// 1. IMPORT MODELS
+// ==========================================
 const Manga = require('../models/Manga');
 const Chapter = require('../models/Chapter');
+const User = require('../models/User');
+
+// Cache sederhana untuk Guest (IP based)
+const guestCache = new Map();
 
 // ==========================================
-// HELPER FUNCTIONS
+// 2. HELPER FUNCTIONS & MIDDLEWARE
 // ==========================================
 
-// Standard Response Format
+// Helper: Standard Response
 const successResponse = (res, data, pagination = null) => {
     res.json({
         success: true,
@@ -17,7 +28,7 @@ const successResponse = (res, data, pagination = null) => {
 };
 
 const errorResponse = (res, message, code = 500) => {
-    console.error(`[Error] ${message}`); // Log error ke console server untuk debugging
+    console.error(`[Error API] ${message}`);
     res.status(code).json({ success: false, message });
 };
 
@@ -33,67 +44,109 @@ const getPaginationParams = (req, defaultLimit = 24) => {
 async function attachChapterCounts(mangas) {
     if (!mangas || mangas.length === 0) return [];
 
-    // 1. Ambil semua ID manga dari list
     const mangaIds = mangas.map(m => m._id);
 
-    // 2. Lakukan 1 kali query Aggregate ke collection Chapter
+    // Aggregate count berdasarkan manga_id
     const counts = await Chapter.aggregate([
         { $match: { manga_id: { $in: mangaIds } } },
         { $group: { _id: "$manga_id", count: { $sum: 1 } } }
     ]);
 
-    // 3. Buat Map untuk akses cepat (Dictionary)
     const countMap = {};
     counts.forEach(c => {
         countMap[c._id.toString()] = c.count;
     });
 
-    // 4. Gabungkan data
-    // Kita asumsikan input 'mangas' sudah berupa Plain Object (karena pakai .lean())
     return mangas.map(m => ({
         ...m,
         chapter_count: countMap[m._id.toString()] || 0
     }));
 }
 
+/**
+ * Middleware: Cek Kuota Download
+ */
+const checkDownloadLimit = async (req, res, next) => {
+    try {
+        // A. USER LOGIN
+        if (req.user && req.user.id) {
+            const user = await User.findById(req.user.id);
+            if (!user) return res.status(404).json({ success: false, message: "User not found" });
+
+            if (user.isPremium) return next();
+
+            if (user.downloadCount >= 50) {
+                return res.status(403).json({ success: false, message: "Limit harian (50) tercapai. Upgrade Premium!" });
+            }
+            req.userDoc = user; 
+            return next();
+        }
+
+        // B. GUEST (Tanpa Login)
+        const ip = req.headers['x-forwarded-for'] || req.socket.remoteAddress;
+        const currentUsage = guestCache.get(ip) || 0;
+
+        if (currentUsage >= 10) {
+            return res.status(403).json({ success: false, message: "Limit Guest (10) tercapai. Silakan Login!" });
+        }
+        
+        req.isGuest = true;
+        req.clientIp = ip;
+        next();
+
+    } catch (err) {
+        console.error("Limit Check Error:", err);
+        res.status(500).json({ success: false, message: "Server Error checking limit" });
+    }
+};
+
 // ==========================================
-// 1. HOME & LISTING ENDPOINTS
+// 3. ENDPOINTS: STATS, HOME, & LIST
 // ==========================================
+
+// GET /api/stats
+router.get('/stats', async (req, res) => {
+    try {
+        if (req.user && req.user.id) {
+            const user = await User.findById(req.user.id);
+            if (!user) return res.json({ type: 'guest', usage: 0, limit: 10 }); // Fallback if user null
+            if (user.isPremium) return res.json({ type: 'premium', usage: user.downloadCount, limit: '∞' });
+            return res.json({ type: 'user', usage: user.downloadCount, limit: 50 });
+        }
+        const ip = req.headers['x-forwarded-for'] || req.socket.remoteAddress;
+        const usage = guestCache.get(ip) || 0;
+        return res.json({ type: 'guest', usage: usage, limit: 10 });
+    } catch (err) {
+        return res.json({ type: 'guest', usage: 0, limit: 10 });
+    }
+});
 
 // GET /api/home 
 router.get('/home', async (req, res) => {
     try {
         const { page, limit, skip } = getPaginationParams(req);
 
-        // Jalankan Query Count Total terpisah agar tidak blocking
         const totalMangaPromise = Manga.countDocuments();
 
-        // Query 1: Recents (UPDATED: Gunakan updatedAt agar chapter baru naik ke atas)
         const recentsPromise = Manga.find()
-            // Tambahkan 'updatedAt' agar bisa dicek frontend
             .select('title slug thumb metadata createdAt updatedAt') 
-            // GANTI: Sort berdasarkan waktu update terakhir (Chapter baru = Atas)
             .sort({ updatedAt: -1 }) 
             .skip(skip)
             .limit(limit)
             .lean(); 
 
-        // Query 2: Trending (Top Views) - Tetap sort by views
         const trendingPromise = Manga.find()
             .select('title slug thumb views metadata')
             .sort({ views: -1 })
             .limit(10)
             .lean();
 
-        // Query 3: Manhwa (UPDATED: Sort by updatedAt juga)
         const manhwasPromise = Manga.find({ 'metadata.type': { $regex: 'manhwa', $options: 'i' } })
             .select('title slug thumb metadata updatedAt')
-            // GANTI: Manhwa yang update chapter baru naik ke atas
             .sort({ updatedAt: -1 }) 
             .limit(10)
             .lean();
 
-        // EKSEKUSI PARALEL (Kecepatan meningkat drastis)
         const [totalManga, recentsRaw, trendingRaw, manhwasRaw] = await Promise.all([
             totalMangaPromise,
             recentsPromise,
@@ -101,7 +154,6 @@ router.get('/home', async (req, res) => {
             manhwasPromise
         ]);
 
-        // Attach chapter counts secara paralel juga
         const [recents, trending, manhwas] = await Promise.all([
             attachChapterCounts(recentsRaw),
             attachChapterCounts(trendingRaw),
@@ -153,13 +205,12 @@ router.get('/manga-list', async (req, res) => {
 });
 
 // ==========================================
-// 2. DETAIL & READ ENDPOINTS
+// 4. DETAIL & READ ENDPOINTS
 // ==========================================
 
 // GET /api/manga/:slug
 router.get('/manga/:slug', async (req, res) => {
     try {
-        // Cari dan update view sekalian ambil datanya
         const manga = await Manga.findOneAndUpdate(
             { slug: req.params.slug },
             { $inc: { views: 1 } },
@@ -170,13 +221,10 @@ router.get('/manga/:slug', async (req, res) => {
 
         const chapters = await Chapter.find({ manga_id: manga._id })
             .select('title slug chapter_index createdAt')
-            // Gunakan -1 untuk Descending (Chapter Terbesar/Terbaru paling atas)
             .sort({ chapter_index: -1 }) 
-            // PENTING: Tambahkan collation agar sorting angka akurat
             .collation({ locale: "en_US", numericOrdering: true })
             .lean();
 
-        // Gabungkan manual karena sudah .lean()
         manga.chapter_count = chapters.length;
 
         successResponse(res, { info: manga, chapters });
@@ -184,7 +232,6 @@ router.get('/manga/:slug', async (req, res) => {
         errorResponse(res, err.message);
     }
 });
-
 
 // GET /api/read/:slug/:chapterSlug
 router.get('/read/:slug/:chapterSlug', async (req, res) => {
@@ -201,6 +248,7 @@ router.get('/read/:slug/:chapterSlug', async (req, res) => {
         }).lean();
 
         if (!chapter) return errorResponse(res, 'Chapter not found', 404);
+
         const [nextChap, prevChap] = await Promise.all([
             Chapter.findOne({ 
                 manga_id: manga._id, 
@@ -219,6 +267,7 @@ router.get('/read/:slug/:chapterSlug', async (req, res) => {
             .collation({ locale: "en_US", numericOrdering: true })
             .lean()
         ]);
+
         successResponse(res, { 
             chapter, 
             manga, 
@@ -232,9 +281,8 @@ router.get('/read/:slug/:chapterSlug', async (req, res) => {
     }
 });
 
-
 // ==========================================
-// 3. SEARCH & FILTERS
+// 5. SEARCH & FILTERS
 // ==========================================
 
 // GET /api/search?q=keyword
@@ -271,16 +319,13 @@ router.get('/search', async (req, res) => {
 // GET /api/genres
 router.get('/genres', async (req, res) => {
     try {
-        // Ambil genre unik dari semua manga
         const genres = await Manga.aggregate([
-            { $unwind: "$tags" }, // Pecah array tags menjadi dokumen terpisah
-            // Filter tags kosong jika ada
+            { $unwind: "$tags" },
             { $match: { tags: { $ne: "" } } }, 
             { $group: { _id: "$tags", count: { $sum: 1 } } },
             { $sort: { _id: 1 } }
         ]);
         
-        // Format output agar lebih bersih: [{name: "Action", count: 10}, ...]
         const formattedGenres = genres.map(g => ({ name: g._id, count: g.count }));
         
         successResponse(res, formattedGenres);
@@ -330,6 +375,96 @@ router.get('/filter/:type/:value', async (req, res) => {
 
     } catch (err) {
         errorResponse(res, err.message);
+    }
+});
+
+// ==========================================
+// 6. DOWNLOAD ENDPOINT
+// ==========================================
+router.get('/download/:slug/:chapterSlug', checkDownloadLimit, async (req, res) => {
+    try {
+        const { slug, chapterSlug } = req.params;
+        
+        // 1. Ambil ID Manga dulu
+        const manga = await Manga.findOne({ slug }).select('title _id').lean();
+        if (!manga) return errorResponse(res, "Manga not found", 404);
+
+        // 2. Ambil Chapter dengan mencocokkan manga_id
+        // PENTING: Tambahkan manga_id agar tidak salah mengambil chapter dari manga lain
+        const chapter = await Chapter.findOne({ 
+            manga_id: manga._id, 
+            slug: chapterSlug 
+        }).lean();
+
+        if (!chapter || !chapter.images || chapter.images.length === 0) {
+            return errorResponse(res, "Images not found", 404);
+        }
+
+        const cleanTitle = manga.title.replace(/[^a-zA-Z0-9]/g, '-');
+        
+        // Setup Header PDF
+        res.setHeader('Content-Type', 'application/pdf');
+        res.setHeader('Content-Disposition', `attachment; filename="${cleanTitle}-Ch${chapter.chapter_index}.pdf"`);
+
+        const doc = new PDFDocument({ autoFirstPage: false });
+        doc.pipe(res);
+
+        // Loop Images
+        for (const url of chapter.images) {
+            try {
+                const response = await axios.get(url, { 
+                    responseType: 'arraybuffer',
+                    headers: { 'User-Agent': 'Mozilla/5.0', 'Referer': 'https://doujindesu.tv/' },
+                    timeout: 15000 
+                });
+                // Kompres gambar agar PDF tidak terlalu besar
+                const imgBuffer = await sharp(response.data).jpeg({ quality: 80 }).toBuffer();
+                
+                const img = doc.openImage(imgBuffer);
+                doc.addPage({ size: [img.width, img.height] });
+                doc.image(img, 0, 0);
+            } catch (e) { 
+                console.error(`[PDF Warning] Skip img: ${url} - Error: ${e.message}`); 
+                // Kita continue saja agar PDF tetap terbuat walau ada 1 gambar gagal
+            }
+        }
+
+        doc.end();
+
+        // Update Limit setelah selesai stream
+        res.on('finish', async () => {
+            try {
+                if (req.userDoc) {
+                    await User.findByIdAndUpdate(req.userDoc._id, { $inc: { downloadCount: 1 } });
+                } else if (req.isGuest) {
+                    const cur = guestCache.get(req.clientIp) || 0;
+                    guestCache.set(req.clientIp, cur + 1);
+                }
+            } catch (err) {
+                console.error("[Limit Update Error]", err);
+            }
+        });
+
+    } catch (err) {
+        console.error(err);
+        if (!res.headersSent) res.status(500).send("Error generating PDF");
+    }
+});
+
+// ==========================================
+// 7. WEBHOOK TRAKTEER
+// ==========================================
+router.post('/trakteer-webhook', async (req, res) => {
+    try {
+        const { supporter_email, status } = req.body;
+        if (status === 'Success') {
+            await User.findOneAndUpdate({ email: supporter_email }, { isPremium: true });
+            console.log(`[Premium] ${supporter_email} upgraded!`);
+        }
+        res.sendStatus(200);
+    } catch (err) {
+        console.error("[Webhook Error]", err);
+        res.sendStatus(500);
     }
 });
 
