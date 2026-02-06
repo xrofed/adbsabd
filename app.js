@@ -27,16 +27,32 @@ app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
 // ==========================================
-// 2. FIREBASE ADMIN INIT
+// 2. FIREBASE ADMIN INIT (SECURED)
 // ==========================================
 try {
-    const serviceAccount = require('./serviceAccountKey.json');
+    let serviceAccount;
+
+    // A. Cek Environment Variable (Prioritas Utama - Production)
+    if (process.env.FIREBASE_SERVICE_ACCOUNT_BASE64) {
+        // Decode string Base64 kembali menjadi JSON Object
+        const buffer = Buffer.from(process.env.FIREBASE_SERVICE_ACCOUNT_BASE64, 'base64');
+        serviceAccount = JSON.parse(buffer.toString('utf8'));
+        console.log("[System] Firebase Admin loaded from ENV (Base64).");
+    } 
+    // B. Cek File Fisik (Cadangan - Local Development)
+    else {
+        // Ini akan error jika file sudah dihapus, tapi berguna saat dev lokal
+        serviceAccount = require('./serviceAccountKey.json');
+        console.log("[System] Firebase Admin loaded from FILE (Local).");
+    }
+
     admin.initializeApp({
         credential: admin.credential.cert(serviceAccount)
     });
-    console.log("[System] Firebase Admin Initialized.");
+    
 } catch (error) {
-    console.warn("[Warning] Gagal init Firebase Admin. Cek 'serviceAccountKey.json'. Login Google mungkin error.");
+    console.warn("[Warning] Gagal init Firebase Admin:", error.message);
+    console.warn("Solusi: Pastikan 'FIREBASE_SERVICE_ACCOUNT_BASE64' ada di .env atau file 'serviceAccountKey.json' tersedia.");
 }
 
 // ==========================================
@@ -68,7 +84,8 @@ app.use(async (req, res, next) => {
             req.user = { id: user._id, email: user.email }; 
             
         } catch (error) {
-            console.error("[Auth] Token invalid:", error.message);
+            // Error token expired atau invalid wajar terjadi, cukup log error kecil
+            // console.error("[Auth] Token invalid:", error.message);
         }
     }
     next();
