@@ -1,14 +1,10 @@
 {
-    "latest_version": "13.0.0",
-    "update_url": "https://doujindesu.fun",
+    "latest_version": "14.0.0",
+    "update_url": "https://doujindesu.web.id",
     "is_force_update": true,
     "whats_new": [
-        "Bebas Iklan (No Ads)",
-        "Tampilan Baru: Dark Mode",
-        "Fitur Download & Mode Offline",
-        "Infinite Scroll: Scroll bawah untuk Next, atas untuk Prev",
-        "Reader Fullscreen (Ketuk 2x)",
-        "Smart Resume & Riwayat Bacaan",
-        "Peningkatan Performa Reader"
+        "Sementara Pindah Ke Website",
+        "Sedang Fix Api",
+        "Penambahan Fitur PDF"
     ]
 }
