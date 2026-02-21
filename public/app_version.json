@@ -1,13 +1,11 @@
 {
     "latest_version": "14.0.0",
-    "update_url": "https://doujindesu.web.id",
+    "update_url": "https://doujindesu.fun",
     "is_force_update": true,
     "whats_new": [
-        "Sementara Pindah Ke Website",
         "Fitur Download Pdf Sudah Selesai",
-        "Sekarang Ui Menggunakan Material 3",
-        "Aplikasi V14 Akan Dirilis",
-        "Setelah Lebaran",
-        "Masih Ada Bug"
+        "Ui Home Di Ubah",
+        "Udah Gitu aja",
+        "Mau Fitur Apa lagi?"
     ]
 }
