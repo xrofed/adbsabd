@@ -509,4 +509,103 @@ router.delete('/users/:googleId/history', async (req, res) => {
     }
 });
 
+// ==========================================
+// 6. DOWNLOAD LIMIT & PREMIUM ENDPOINTS
+// ==========================================
+
+// POST /api/users/:googleId/download
+// Mengecek limit dan menambahkan hitungan download harian
+router.post('/users/:googleId/download', async (req, res) => {
+    try {
+        // Karena kita sudah import const User = require('../models/User'); di atas, kita bisa langsung pakai
+        const { googleId } = req.params;
+        const user = await User.findOne({ googleId });
+        if (!user) return errorResponse(res, 'User not found', 404);
+
+        // 1. Cek Kadaluarsa Premium
+        if (user.isPremium && user.premiumUntil) {
+            // Jika hari ini sudah melewati tanggal premiumUntil, matikan premiumnya
+            if (new Date() > user.premiumUntil) {
+                user.isPremium = false;
+                user.premiumUntil = null;
+            }
+        }
+
+        // Jika user masih Premium (atau Admin), langsung loloskan tanpa limit
+        // Ganti 'TPuc7EiYeFZcea9HGMe0mwl2ie13' dengan UID Google kamu sendiri sebagai Admin
+        if (user.isPremium || googleId === 'TPuc7EiYeFZcea9HGMe0mwl2ie13') { 
+            await user.save(); // Simpan jika ada perubahan status kadaluarsa
+            return successResponse(res, { allowed: true, isPremium: true });
+        }
+
+        // 2. Logika Limit User Biasa (20x Sehari)
+        const today = new Date().toISOString().split('T')[0]; // Mendapatkan tanggal "YYYY-MM-DD"
+        const MAX_LIMIT = 20;
+
+        // Pastikan object dailyDownloads ada, jika tidak, buat struktur default-nya
+        if (!user.dailyDownloads) {
+            user.dailyDownloads = { date: "", count: 0 };
+        }
+
+        // Jika tanggal di database beda dengan hari ini, reset hitungan jadi 0
+        if (user.dailyDownloads.date !== today) {
+            user.dailyDownloads.date = today;
+            user.dailyDownloads.count = 0;
+        }
+
+        // Jika sudah mencapai batas
+        if (user.dailyDownloads.count >= MAX_LIMIT) {
+            await user.save();
+            return successResponse(res, { 
+                allowed: false, 
+                current: user.dailyDownloads.count, 
+                max: MAX_LIMIT,
+                message: "Batas unduhan harian (20) tercapai. Tunggu besok atau upgrade Premium!"
+            });
+        }
+
+        // 3. Tambah hitungan jika belum limit
+        user.dailyDownloads.count += 1;
+        user.downloadCount += 1; // Total seumur hidup
+        await user.save();
+
+        successResponse(res, { 
+            allowed: true, 
+            current: user.dailyDownloads.count, 
+            max: MAX_LIMIT 
+        });
+    } catch (err) {
+        errorResponse(res, err.message);
+    }
+});
+
+// POST /api/users/:googleId/set-premium
+// Rute Khusus Admin untuk memberikan Premium (Misal: 7 hari, 30 hari)
+router.post('/users/:googleId/set-premium', async (req, res) => {
+    try {
+        const { googleId } = req.params;
+        const { days } = req.body; // Jumlah hari premium dari Flutter
+
+        if (!days) return errorResponse(res, 'Jumlah hari (days) diperlukan', 400);
+
+        const user = await User.findOne({ googleId });
+        if (!user) return errorResponse(res, 'User not found', 404);
+
+        user.isPremium = true;
+        
+        // Hitung tanggal kadaluarsa dari hari ini + jumlah hari
+        const expDate = new Date();
+        expDate.setDate(expDate.getDate() + parseInt(days));
+        user.premiumUntil = expDate;
+
+        await user.save();
+        successResponse(res, { 
+            message: `Premium berhasil diaktifkan selama ${days} hari`, 
+            premiumUntil: user.premiumUntil 
+        });
+    } catch (err) {
+        errorResponse(res, err.message);
+    }
+});
+
 module.exports = router;
