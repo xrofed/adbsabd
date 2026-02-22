@@ -24,19 +24,26 @@ const librarySchema = new mongoose.Schema({
     addedAt: { type: Date, default: Date.now }
 });
 
+
 // 3. Schema User Utama
 const userSchema = new mongoose.Schema({
     googleId: String,
     email: String,
     displayName: String,
+    
+    // --- FITUR PREMIUM & LIMIT BARU ---
     isPremium: { type: Boolean, default: false },
-    downloadCount: { type: Number, default: 0 },
+    premiumUntil: { type: Date, default: null }, // Kapan premium berakhir
+    dailyDownloads: {
+        date: { type: String, default: "" }, // Format: YYYY-MM-DD
+        count: { type: Number, default: 0 }
+    },
+    
+    downloadCount: { type: Number, default: 0 }, // Total download seumur hidup (opsional)
     lastDownloadDate: { type: Date, default: Date.now },
     
-    // 4. Masukkan History dan Library sebagai Array ke dalam User
     history: [historySchema],
     library: [librarySchema]
 });
 
-// Jangan lupa export modelnya agar bisa dipakai di file lain
 module.exports = mongoose.model('User', userSchema);
