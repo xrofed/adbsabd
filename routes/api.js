@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const Manga = require('../models/Manga');
 const Chapter = require('../models/Chapter');
+const User = require('../models/User');
 
 // ==========================================
 // HELPER FUNCTIONS
