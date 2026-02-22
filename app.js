@@ -5,7 +5,9 @@ require('dotenv').config({
 const express = require('express');
 const mongoose = require('mongoose');
 const path = require('path');
-const Manga = require('./models/Manga');
+// Tidak perlu import model di app.js jika tidak digunakan langsung di sini, 
+// tapi aku biarkan saja agar tidak mengubah kodemu terlalu banyak.
+const Manga = require('./models/Manga'); 
 const Chapter = require('./models/Chapter');
 
 // IMPORT RUTE API (PENTING)
@@ -15,15 +17,21 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 const WEBSITE_URL = process.env.SITE_URL || `http://localhost:${PORT}`;
 
+// ==========================================
+// MIDDLEWARE (TAMBAHAN PENTING UNTUK BACA JSON DARI FLUTTER)
+// ==========================================
+app.use(express.json()); // Membaca tipe application/json
+app.use(express.urlencoded({ extended: true })); // Membaca tipe application/x-www-form-urlencoded
+
 app.set('view engine', 'ejs');
 app.set('views', path.join(__dirname, 'views'));
 app.use(express.static('public'));
 
-
+// PASTIKAN API ROUTE ADA DI BAWAH MIDDLEWARE EXPRESS.JSON
 app.use('/api', apiRoutes);
 
 // ==========================================
-// 4. SERVER STARTUP
+// SERVER STARTUP
 // ==========================================
 
 const DB_URI = process.env.DB_URI;
