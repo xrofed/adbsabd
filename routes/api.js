@@ -334,19 +334,49 @@ router.get('/filter/:type/:value', async (req, res) => {
     }
 });
 
+// POST /api/users/sync
+// Mendapatkan data user, mengecek masa aktif premium, dan reset limit harian
 router.post('/users/sync', async (req, res) => {
     try {
         const { googleId, email, displayName } = req.body;
         if (!googleId) return errorResponse(res, 'googleId is required', 400);
 
-        // Cari user. Jika tidak ketemu, otomatis buat dokumen baru (upsert)
         let user = await User.findOne({ googleId });
+        const today = new Date().toISOString().split('T')[0]; // Mendapatkan tanggal hari ini (YYYY-MM-DD)
         
+        // 1. JIKA USER BARU: Buat data baru sebagai Anggota Reguler
         if (!user) {
-            user = new User({ googleId, email, displayName });
-            await user.save();
+            user = new User({ 
+                googleId, 
+                email, 
+                displayName,
+                isPremium: false, // Set ke Reguler
+                // Berikan hitungan awal 0 (artinya user punya full 20 limit untuk hari ini)
+                dailyDownloads: { date: today, count: 0 } 
+            });
+        } else {
+            // 2. JIKA USER LAMA: Cek apakah masa aktif Premium sudah habis
+            if (user.isPremium && user.premiumUntil) {
+                // Jika tanggal hari ini sudah melewati tanggal batas Premium
+                if (new Date() > user.premiumUntil) {
+                    user.isPremium = false; // Kembalikan status menjadi Anggota Reguler
+                    user.premiumUntil = null; // Kosongkan tanggal batas
+                }
+            }
+
+            // 3. JIKA USER LAMA: Reset hitungan limit download jika hari sudah berganti
+            // Pastikan struktur dailyDownloads aman
+            if (!user.dailyDownloads) {
+                user.dailyDownloads = { date: today, count: 0 };
+            } else if (user.dailyDownloads.date !== today) {
+                // Jika tanggal terakhir download BUKAN hari ini, reset hitungan jadi 0
+                user.dailyDownloads.date = today;
+                user.dailyDownloads.count = 0;
+            }
         }
 
+        // Simpan pembaruan data ke MongoDB
+        await user.save();
         successResponse(res, user);
     } catch (err) {
         errorResponse(res, err.message);
