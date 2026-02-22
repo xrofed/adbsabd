@@ -333,4 +333,179 @@ router.get('/filter/:type/:value', async (req, res) => {
     }
 });
 
+router.post('/users/sync', async (req, res) => {
+    try {
+        const { googleId, email, displayName } = req.body;
+        if (!googleId) return errorResponse(res, 'googleId is required', 400);
+
+        // Cari user. Jika tidak ketemu, otomatis buat dokumen baru (upsert)
+        let user = await User.findOne({ googleId });
+        
+        if (!user) {
+            user = new User({ googleId, email, displayName });
+            await user.save();
+        }
+
+        successResponse(res, user);
+    } catch (err) {
+        errorResponse(res, err.message);
+    }
+});
+
+// POST /api/users/:googleId/library
+// Menambah atau memperbarui manga di Library
+router.post('/users/:googleId/library', async (req, res) => {
+    try {
+        const { googleId } = req.params;
+        const { slug, mangaData } = req.body;
+
+        if (!slug) return errorResponse(res, 'slug is required', 400);
+
+        const user = await User.findOne({ googleId });
+        if (!user) return errorResponse(res, 'User not found', 404);
+
+        // Cek apakah manga sudah ada di library
+        const existingIndex = user.library.findIndex(item => item.slug === slug);
+
+        if (existingIndex >= 0) {
+            // Jika sudah ada, perbarui data manga dan waktu ditambahkan
+            user.library[existingIndex].mangaData = mangaData;
+            user.library[existingIndex].addedAt = Date.now();
+        } else {
+            // Jika belum ada, masukkan ke dalam array library
+            user.library.push({ slug, mangaData });
+        }
+
+        await user.save();
+        successResponse(res, user.library);
+    } catch (err) {
+        errorResponse(res, err.message);
+    }
+});
+
+// POST /api/users/:googleId/history
+// Mencatat atau memperbarui riwayat bacaan
+router.post('/users/:googleId/history', async (req, res) => {
+    try {
+        const { googleId } = req.params;
+        const { type, slug, title, thumb, lastChapterTitle, lastChapterSlug } = req.body;
+
+        if (!slug) return errorResponse(res, 'slug is required', 400);
+
+        const user = await User.findOne({ googleId });
+        if (!user) return errorResponse(res, 'User not found', 404);
+
+        // Cek apakah manga ini sudah ada di history sebelumnya
+        const existingIndex = user.history.findIndex(item => item.slug === slug);
+
+        if (existingIndex >= 0) {
+            // Jika sudah ada, cukup update chapter terakhir dan waktu bacanya
+            user.history[existingIndex].lastChapterTitle = lastChapterTitle;
+            user.history[existingIndex].lastChapterSlug = lastChapterSlug;
+            user.history[existingIndex].lastRead = Date.now();
+            // Update detail lain jika disediakan
+            if (title) user.history[existingIndex].title = title;
+            if (thumb) user.history[existingIndex].thumb = thumb;
+        } else {
+            // Jika belum ada, tambahkan history baru
+            user.history.push({
+                type, slug, title, thumb, lastChapterTitle, lastChapterSlug
+            });
+        }
+
+        await user.save();
+        successResponse(res, user.history);
+    } catch (err) {
+        errorResponse(res, err.message);
+    }
+});
+
+// ==========================================
+// 5. USER DELETE ENDPOINTS
+// ==========================================
+
+// DELETE /api/users/:googleId/library/:slug
+// Menghapus satu manga secara spesifik dari Library
+router.delete('/users/:googleId/library/:slug', async (req, res) => {
+    try {
+        const { googleId, slug } = req.params;
+        const user = await User.findOne({ googleId });
+        
+        if (!user) return errorResponse(res, 'User not found', 404);
+
+        // Hapus manga dengan slug yang cocok dari array library
+        user.library = user.library.filter(item => item.slug !== slug);
+        await user.save();
+
+        successResponse(res, { message: 'Manga berhasil dihapus dari library' });
+    } catch (err) {
+        errorResponse(res, err.message);
+    }
+});
+
+// DELETE /api/users/:googleId/library
+// Menghapus SEMUA manga dari Library (Clear Library)
+router.delete('/users/:googleId/library', async (req, res) => {
+    try {
+        const { googleId } = req.params;
+        const user = await User.findOne({ googleId });
+        
+        if (!user) return errorResponse(res, 'User not found', 404);
+
+        // Kosongkan array library
+        user.library = [];
+        await user.save();
+
+        successResponse(res, { message: 'Library berhasil dikosongkan' });
+    } catch (err) {
+        errorResponse(res, err.message);
+    }
+});
+
+// DELETE /api/users/:googleId/history/:slug
+// Menghapus satu riwayat bacaan secara spesifik
+router.delete('/users/:googleId/history/:slug', async (req, res) => {
+    try {
+        const { googleId, slug } = req.params;
+        const user = await User.findOne({ googleId });
+        
+        if (!user) return errorResponse(res, 'User not found', 404);
+
+        // Hapus history dengan slug yang cocok
+        user.history = user.history.filter(item => item.slug !== slug);
+        await user.save();
+
+        successResponse(res, { message: 'Riwayat bacaan berhasil dihapus' });
+    } catch (err) {
+        errorResponse(res, err.message);
+    }
+});
+
+// DELETE /api/users/:googleId/history
+// Menghapus SEMUA riwayat bacaan, bisa difilter berdasarkan tipe (?type=manga)
+router.delete('/users/:googleId/history', async (req, res) => {
+    try {
+        const { googleId } = req.params;
+        const { type } = req.query; // Ambil tipe dari query parameter
+        const user = await User.findOne({ googleId });
+        
+        if (!user) return errorResponse(res, 'User not found', 404);
+
+        if (type) {
+            // Jika ada tipe spesifik (misal hanya mau hapus history 'manga'), 
+            // simpan yang tipenya TIDAK SAMA dengan yang mau dihapus
+            user.history = user.history.filter(item => item.type !== type);
+        } else {
+            // Jika tidak ada tipe, kosongkan semua history
+            user.history = [];
+        }
+        
+        await user.save();
+
+        successResponse(res, { message: 'Riwayat bacaan berhasil dibersihkan' });
+    } catch (err) {
+        errorResponse(res, err.message);
+    }
+});
+
 module.exports = router;
