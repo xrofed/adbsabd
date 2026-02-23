@@ -645,7 +645,8 @@ router.post('/users/:googleId/set-premium', async (req, res) => {
         user.notifications.push({
             title: "Premium Diaktifkan! 🎉",
             message: `Admin telah mengaktifkan status Premium kamu selama ${days} hari. Nikmati fitur unduhan tanpa batas!`,
-            isRead: false
+            isRead: false,
+            createdAt: new Date() // <-- PENTING: Tambahkan timestamp untuk sorting
         });
 
         // 4. Simpan ke Database
@@ -655,6 +656,44 @@ router.post('/users/:googleId/set-premium', async (req, res) => {
             message: `Premium berhasil diaktifkan selama ${days} hari`, 
             premiumUntil: user.premiumUntil 
         });
+    } catch (err) {
+        errorResponse(res, err.message);
+    }
+});
+
+// ==========================================
+// 7. NOTIFICATION ENDPOINTS
+// ==========================================
+
+// GET /api/users/:googleId/notifications
+// Mengambil semua notifikasi untuk seorang user
+router.get('/users/:googleId/notifications', async (req, res) => {
+    try {
+        const { googleId } = req.params;
+        // Ambil hanya field notifikasi untuk efisiensi
+        const user = await User.findOne({ googleId }).select('notifications').lean();
+        
+        if (!user) return errorResponse(res, 'User not found', 404);
+
+        // Urutkan notifikasi dari yang terbaru ke terlama sebelum mengirim
+        const sortedNotifications = (user.notifications || []).sort((a, b) => 
+            new Date(b.createdAt) - new Date(a.createdAt)
+        );
+
+        successResponse(res, sortedNotifications);
+    } catch (err) {
+        errorResponse(res, err.message);
+    }
+});
+
+// PUT /api/users/:googleId/notifications/read
+// Menandai semua notifikasi sebagai sudah dibaca
+router.put('/users/:googleId/notifications/read', async (req, res) => {
+    try {
+        const { googleId } = req.params;
+        // Update semua item dalam array notifikasi, set isRead menjadi true
+        await User.updateOne({ googleId }, { $set: { "notifications.$[].isRead": true } });
+        successResponse(res, { message: 'All notifications marked as read' });
     } catch (err) {
         errorResponse(res, err.message);
     }
