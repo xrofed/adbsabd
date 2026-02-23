@@ -36,7 +36,7 @@ app.use('/api', apiRoutes);
 // 1. ERROR HANDLING KHUSUS API (404 JSON)
 // ------------------------------------------
 // Jika user akses /api/ngawur, jangan kasih HTML, tapi kasih JSON error.
-app.use('/api/*', (req, res) => {
+app.use('/api', (req, res) => {
   res.status(404).json({
     success: false,
     message: 'API endpoint not found',
