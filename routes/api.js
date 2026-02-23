@@ -632,14 +632,25 @@ router.post('/users/:googleId/set-premium', async (req, res) => {
         const user = await User.findOne({ googleId });
         if (!user) return errorResponse(res, 'User not found', 404);
 
+        // 1. Set Status Premium
         user.isPremium = true;
         
-        // Hitung tanggal kadaluarsa dari hari ini + jumlah hari
+        // 2. Hitung tanggal kadaluarsa dari hari ini + jumlah hari (Cukup tulis SATU KALI saja)
         const expDate = new Date();
         expDate.setDate(expDate.getDate() + parseInt(days));
         user.premiumUntil = expDate;
 
+        // 3. Tambahkan Notifikasi ke User
+        if (!user.notifications) user.notifications = [];
+        user.notifications.push({
+            title: "Premium Diaktifkan! 🎉",
+            message: `Admin telah mengaktifkan status Premium kamu selama ${days} hari. Nikmati fitur unduhan tanpa batas!`,
+            isRead: false
+        });
+
+        // 4. Simpan ke Database
         await user.save();
+        
         successResponse(res, { 
             message: `Premium berhasil diaktifkan selama ${days} hari`, 
             premiumUntil: user.premiumUntil 
