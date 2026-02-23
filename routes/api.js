@@ -17,6 +17,12 @@ const successResponse = (res, data, pagination = null) => {
     });
 };
 
+const settingsSchema = new mongoose.Schema({
+    key: { type: String, unique: true },
+    value: String
+});
+const Settings = mongoose.model('Settings', settingsSchema);
+
 const errorResponse = (res, message, code = 500) => {
     console.error(`[Error] ${message}`); // Log error ke console server untuk debugging
     res.status(code).json({ success: false, message });
@@ -553,13 +559,12 @@ router.delete('/users/:googleId/history', async (req, res) => {
 // Mengecek limit dan menambahkan hitungan download harian
 router.post('/users/:googleId/download', async (req, res) => {
     try {
-        // Karena kita sudah import const User = require('../models/User'); di atas, kita bisa langsung pakai
         const { googleId } = req.params;
         const user = await User.findOne({ googleId });
         if (!user) return errorResponse(res, 'User not found', 404);
 
-        // 1. Cek Kadaluarsa Premium
-        if (user.isPremium && user.premiumUntil) {
+        // 1. Cek Kadaluarsa Premium (Khusus untuk user biasa / bukan admin)
+        if (!user.isAdmin && user.isPremium && user.premiumUntil) {
             // Jika hari ini sudah melewati tanggal premiumUntil, matikan premiumnya
             if (new Date() > user.premiumUntil) {
                 user.isPremium = false;
@@ -567,9 +572,8 @@ router.post('/users/:googleId/download', async (req, res) => {
             }
         }
 
-        // Jika user masih Premium (atau Admin), langsung loloskan tanpa limit
-        // Ganti 'TPuc7EiYeFZcea9HGMe0mwl2ie13' dengan UID Google kamu sendiri sebagai Admin
-        if (user.isPremium || googleId === 'TPuc7EiYeFZcea9HGMe0mwl2ie13') { 
+        // Jika user masih Premium ATAU Admin, langsung loloskan tanpa limit
+        if (user.isPremium || user.isAdmin) { 
             await user.save(); // Simpan jika ada perubahan status kadaluarsa
             return successResponse(res, { allowed: true, isPremium: true });
         }
@@ -641,6 +645,36 @@ router.post('/users/:googleId/set-premium', async (req, res) => {
         });
     } catch (err) {
         errorResponse(res, err.message);
+    }
+});
+
+// GET: Mengambil Nomor WhatsApp Admin
+router.get('/settings/whatsapp', async (req, res) => {
+    try {
+        let setting = await Settings.findOne({ key: 'whatsapp' });
+        // Jika belum ada di database, kembalikan nomor default
+        res.json({ success: true, whatsapp: setting ? setting.value : '6281234567890' });
+    } catch (err) {
+        res.status(500).json({ success: false, message: err.message });
+    }
+});
+
+// POST: Mengubah Nomor WhatsApp Admin
+router.post('/settings/whatsapp', async (req, res) => {
+    try {
+        const { whatsapp } = req.body;
+        let setting = await Settings.findOne({ key: 'whatsapp' });
+        
+        if (!setting) {
+            setting = new Settings({ key: 'whatsapp', value: whatsapp });
+        } else {
+            setting.value = whatsapp;
+        }
+        
+        await setting.save();
+        res.json({ success: true, whatsapp: setting.value });
+    } catch (err) {
+        res.status(500).json({ success: false, message: err.message });
     }
 });
 
