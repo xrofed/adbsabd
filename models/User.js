@@ -1,6 +1,13 @@
 // models/User.js
 const mongoose = require('mongoose');
 
+const notificationSchema = new mongoose.Schema({
+    title: String,
+    message: String,
+    isRead: { type: Boolean, default: false },
+    createdAt: { type: Date, default: Date.now }
+});
+
 // 1. Buat Schema untuk History
 const historySchema = new mongoose.Schema({
     type: String, // Contoh: 'manga', 'manhwa'
@@ -17,13 +24,11 @@ const librarySchema = new mongoose.Schema({
     slug: { type: String, required: true },
     
     // Karena di Flutter kamu menggunakan manga.toJson(), 
-    // kamu bisa menggunakan tipe Mixed untuk menyimpan object JSON yang dinamis,
-    // atau kamu bisa mendefinisikan field spesifik seperti title, thumb, dll.
+    // kamu bisa menggunakan tipe Mixed untuk menyimpan object JSON yang dinamis.
     mangaData: { type: mongoose.Schema.Types.Mixed }, 
     
     addedAt: { type: Date, default: Date.now }
 });
-
 
 // 3. Schema User Utama
 const userSchema = new mongoose.Schema({
@@ -43,9 +48,11 @@ const userSchema = new mongoose.Schema({
     downloadCount: { type: Number, default: 0 }, // Total download seumur hidup (opsional)
     lastDownloadDate: { type: Date, default: Date.now },
     
+    // --- TAMBAHKAN ARRAY NOTIFIKASI DI SINI ---
+    notifications: [notificationSchema], 
+    
     history: [historySchema],
     library: [librarySchema]
 });
 
 module.exports = mongoose.model('User', userSchema);
-
