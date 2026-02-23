@@ -1,16 +1,15 @@
-// app.js - FINAL VERSION (FIXED)
 require('dotenv').config({
   debug: false, quiet: true
 });
 const express = require('express');
 const mongoose = require('mongoose');
 const path = require('path');
-// Tidak perlu import model di app.js jika tidak digunakan langsung di sini, 
-// tapi aku biarkan saja agar tidak mengubah kodemu terlalu banyak.
+
+// Model (dibiarkan sesuai request)
 const Manga = require('./models/Manga'); 
 const Chapter = require('./models/Chapter');
 
-// IMPORT RUTE API (PENTING)
+// IMPORT RUTE API
 const apiRoutes = require('./routes/api');
 
 const app = express();
@@ -18,22 +17,45 @@ const PORT = process.env.PORT || 3000;
 const WEBSITE_URL = process.env.SITE_URL || `http://localhost:${PORT}`;
 
 // ==========================================
-// MIDDLEWARE (TAMBAHAN PENTING UNTUK BACA JSON DARI FLUTTER)
+// MIDDLEWARE
 // ==========================================
-app.use(express.json()); // Membaca tipe application/json
-app.use(express.urlencoded({ extended: true })); // Membaca tipe application/x-www-form-urlencoded
+app.use(express.json()); 
+app.use(express.urlencoded({ extended: true })); 
 
-app.set('view engine', 'ejs');
-app.set('views', path.join(__dirname, 'views'));
-app.use(express.static('public'));
+// Folder Public (index.html ada di sini)
+// express.static akan otomatis melayani index.html jika user membuka root '/'
+app.use(express.static(path.join(__dirname, 'public')));
 
-// PASTIKAN API ROUTE ADA DI BAWAH MIDDLEWARE EXPRESS.JSON
+// ==========================================
+// RUTE API (Prioritas Tinggi)
+// ==========================================
+// Pastikan API didefinisikan SEBELUM catch-all route
 app.use('/api', apiRoutes);
+
+// ------------------------------------------
+// 1. ERROR HANDLING KHUSUS API (404 JSON)
+// ------------------------------------------
+// Jika user akses /api/ngawur, jangan kasih HTML, tapi kasih JSON error.
+app.use('/api/*', (req, res) => {
+  res.status(404).json({
+    success: false,
+    message: 'API endpoint not found',
+    status: 404
+  });
+});
+
+// ------------------------------------------
+// 2. ERROR HANDLING UNTUK WEB (SPA Fallback)
+// ------------------------------------------
+// Jika rute tidak ditemukan di atas (bukan API & bukan file statis),
+// kirimkan file index.html dari folder public.
+app.get('*', (req, res) => {
+  res.sendFile(path.join(__dirname, 'public', 'index.html'));
+});
 
 // ==========================================
 // SERVER STARTUP
 // ==========================================
-
 const DB_URI = process.env.DB_URI;
 
 if (!DB_URI) {
