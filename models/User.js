@@ -32,6 +32,7 @@ const userSchema = new mongoose.Schema({
     displayName: String,
     
     // --- FITUR PREMIUM & LIMIT BARU ---
+    isAdmin: { type: Boolean, default: false },
     isPremium: { type: Boolean, default: false },
     premiumUntil: { type: Date, default: null }, // Kapan premium berakhir
     dailyDownloads: {
@@ -47,3 +48,4 @@ const userSchema = new mongoose.Schema({
 });
 
 module.exports = mongoose.model('User', userSchema);
+
