@@ -5,7 +5,7 @@ const express = require('express');
 const mongoose = require('mongoose');
 const path = require('path');
 
-// Model (dibiarkan sesuai request)
+// Model (dibiarkan sesuai request, meski tidak dipakai langsung di sini)
 const Manga = require('./models/Manga'); 
 const Chapter = require('./models/Chapter');
 
@@ -19,23 +19,26 @@ const WEBSITE_URL = process.env.SITE_URL || `http://localhost:${PORT}`;
 // ==========================================
 // MIDDLEWARE
 // ==========================================
+// Middleware untuk parsing body request
 app.use(express.json()); 
 app.use(express.urlencoded({ extended: true })); 
 
-// Folder Public (index.html ada di sini)
-// express.static akan otomatis melayani index.html jika user membuka root '/'
+// Middleware Static Files
+// Melayani file di folder 'public' (css, js, gambar, index.html)
 app.use(express.static(path.join(__dirname, 'public')));
 
 // ==========================================
-// RUTE API (Prioritas Tinggi)
+// RUTE API (Prioritas Utama)
 // ==========================================
-// Pastikan API didefinisikan SEBELUM catch-all route
+// Semua request yang diawali '/api' masuk ke sini
 app.use('/api', apiRoutes);
 
 // ------------------------------------------
 // 1. ERROR HANDLING KHUSUS API (404 JSON)
 // ------------------------------------------
-// Jika user akses /api/ngawur, jangan kasih HTML, tapi kasih JSON error.
+// Menangani jika user mengakses endpoint API yang TIDAK ADA.
+// Contoh: /api/ngawur -> Return JSON 404 (Aman untuk Flutter).
+// CATATAN: Jangan pakai '/api/*' agar tidak kena PathError di Express baru.
 app.use('/api', (req, res) => {
   res.status(404).json({
     success: false,
@@ -47,8 +50,8 @@ app.use('/api', (req, res) => {
 // ------------------------------------------
 // 2. ERROR HANDLING UNTUK WEB (SPA Fallback)
 // ------------------------------------------
-// Jika rute tidak ditemukan di atas (bukan API & bukan file statis),
-// kirimkan file index.html dari folder public.
+// Menangani semua rute lain yang bukan API dan bukan file statis.
+// Mengirimkan index.html agar Frontend (Single Page App) yang menangani routing.
 app.get('*', (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
@@ -65,11 +68,13 @@ if (!DB_URI) {
 
 const startServer = async () => {
   try {
+    // Koneksi ke Database
     await mongoose.connect(DB_URI, {
       serverSelectionTimeoutMS: 30000
     });
     console.log('Successfully connected to MongoDB...');
 
+    // Jalankan Server
     app.listen(PORT, () => {
       console.log(`Server is running on port: ${PORT}`);
       console.log(`Access at: ${WEBSITE_URL}`);
