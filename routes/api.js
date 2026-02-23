@@ -662,6 +662,55 @@ router.post('/users/:googleId/set-premium', async (req, res) => {
 });
 
 // ==========================================
+// 8. ADMIN ENDPOINTS
+// ==========================================
+
+// Middleware untuk memverifikasi apakah user adalah admin
+const isAdmin = async (req, res, next) => {
+    // Ambil adminId dari body request untuk verifikasi
+    const { adminId } = req.body;
+    const ADMIN_UIDS = ['TPuc7EiYeFZcea9HGMe0mwl2ie13']; // Pastikan UID admin Anda ada di sini
+
+    if (!adminId || !ADMIN_UIDS.includes(adminId)) {
+        return errorResponse(res, 'Akses ditolak. Hanya untuk Admin.', 403);
+    }
+    // Jika lolos, lanjutkan ke fungsi selanjutnya
+    next();
+};
+
+// POST /api/admin/broadcast
+// Mengirim notifikasi ke semua user
+router.post('/admin/broadcast', isAdmin, async (req, res) => {
+    try {
+        const { title, message } = req.body;
+
+        if (!title || !message) {
+            return errorResponse(res, 'Judul dan pesan tidak boleh kosong', 400);
+        }
+
+        const newNotification = {
+            title,
+            message,
+            isRead: false,
+            createdAt: new Date()
+        };
+
+        // Menggunakan updateMany untuk menambahkan notifikasi ke SEMUA user
+        const result = await User.updateMany(
+            {}, // Filter kosong berarti memilih semua dokumen (user)
+            { $push: { notifications: newNotification } }
+        );
+
+        successResponse(res, {
+            message: `Notifikasi berhasil dikirim ke ${result.modifiedCount} user.`
+        });
+
+    } catch (err) {
+        errorResponse(res, err.message);
+    }
+});
+
+// ==========================================
 // 7. NOTIFICATION ENDPOINTS
 // ==========================================
 
