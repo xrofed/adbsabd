@@ -336,46 +336,52 @@ router.get('/filter/:type/:value', async (req, res) => {
 
 // POST /api/users/sync
 // Mendapatkan data user, mengecek masa aktif premium, dan reset limit harian
+// POST /api/users/sync
 router.post('/users/sync', async (req, res) => {
     try {
         const { googleId, email, displayName } = req.body;
         if (!googleId) return errorResponse(res, 'googleId is required', 400);
 
+        // ==========================================
+        // LOGIKA ADMIN: Taruh UID kamu di dalam array ini
+        // ==========================================
+        const ADMIN_UIDS = ['TPuc7EiYeFZcea9HGMe0mwl2ie13']; 
+        const isUserAdmin = ADMIN_UIDS.includes(googleId);
+
         let user = await User.findOne({ googleId });
         const today = new Date().toISOString().split('T')[0]; // Mendapatkan tanggal hari ini (YYYY-MM-DD)
         
-        // 1. JIKA USER BARU: Buat data baru sebagai Anggota Reguler
+        // 1. JIKA USER BARU
         if (!user) {
             user = new User({ 
                 googleId, 
                 email, 
                 displayName,
-                isPremium: false, // Set ke Reguler
-                // Berikan hitungan awal 0 (artinya user punya full 20 limit untuk hari ini)
+                isAdmin: isUserAdmin,   // <--- Otomatis jadi admin jika UID cocok
+                isPremium: isUserAdmin, // <--- Admin otomatis dapet akses Premium
                 dailyDownloads: { date: today, count: 0 } 
             });
         } else {
-            // 2. JIKA USER LAMA: Cek apakah masa aktif Premium sudah habis
-            if (user.isPremium && user.premiumUntil) {
-                // Jika tanggal hari ini sudah melewati tanggal batas Premium
+            // 2. JIKA USER LAMA
+            user.isAdmin = isUserAdmin;
+            if (isUserAdmin) {
+                user.isPremium = true;
+            } else if (user.isPremium && user.premiumUntil) {
                 if (new Date() > user.premiumUntil) {
-                    user.isPremium = false; // Kembalikan status menjadi Anggota Reguler
-                    user.premiumUntil = null; // Kosongkan tanggal batas
+                    user.isPremium = false;
+                    user.premiumUntil = null;
                 }
             }
 
-            // 3. JIKA USER LAMA: Reset hitungan limit download jika hari sudah berganti
-            // Pastikan struktur dailyDownloads aman
+            // Logika Reset Limit Download
             if (!user.dailyDownloads) {
                 user.dailyDownloads = { date: today, count: 0 };
             } else if (user.dailyDownloads.date !== today) {
-                // Jika tanggal terakhir download BUKAN hari ini, reset hitungan jadi 0
                 user.dailyDownloads.date = today;
                 user.dailyDownloads.count = 0;
             }
         }
 
-        // Simpan pembaruan data ke MongoDB
         await user.save();
         successResponse(res, user);
     } catch (err) {
